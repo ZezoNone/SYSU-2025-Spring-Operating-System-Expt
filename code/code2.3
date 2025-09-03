@@ -1,0 +1,35 @@
+org 0x7c00
+[bits 16]
+
+mov dh, 16   	
+mov dl, 10		
+
+Input:
+mov ah, 0x00  
+int 0x16
+or al, 0x00   
+jnz print_key 
+jmp Input      
+
+print_key:
+call cursor_inc
+
+mov ah, 0x09  
+mov bl, 0x74  
+mov cx, 0x01  
+int 0x10
+jmp Input     
+
+cursor_inc:
+    inc dl
+    cmp dl, 80
+    jne add_cursor
+    mov dl, 0
+    inc dh
+add_cursor:
+    mov ah, 2; set cursor +1
+    int 10h
+    ret
+
+times 510-($-$$) db 0
+db 0x55, 0xaa
