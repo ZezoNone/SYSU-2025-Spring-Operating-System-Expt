@@ -1,0 +1,20 @@
+nasm -f bin bootloader.asm -o bootloader.bin
+nasm -f bin mbr1.2.asm -o mbr1.2.bin
+dd if=bootloader.bin of=hd.img bs=512 count=5 seek=1 conv=notrunc
+dd if=mbr1.2.bin of=hd.img bs=512 count=1 seek=0 conv=notrunc
+qemu-system-i386 -hda hd.img -serial null -parallel stdio
+
+nasm -o test.o -g -f elf32 test
+ld -o test.symbol -melf_i386 -N test.o -Ttext 0x7c00
+qemu-system-i386 -hda hd.img -s -S -parallel stdio -serial null
+
+gdb
+target remote:1234
+add-symbol-file test.symbol 0x7c00
+layout src
+b *0x7c00
+
+target remote:1234
+set disassembly-flavor intel
+add-symbol-file mbr.symbol 0x7c00
+add-symbol-file bootloader.symbol 0x7c00

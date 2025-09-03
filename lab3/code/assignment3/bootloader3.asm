@@ -1,0 +1,197 @@
+%include "boot.inc"
+org 0x7e00
+[bits 16]
+
+;空描述符
+mov dword [GDT_START_ADDRESS+0x00],0x00
+mov dword [GDT_START_ADDRESS+0x04],0x00  
+
+;创建描述符，这是一个数据段，对应0~4GB的线性地址空间
+mov dword [GDT_START_ADDRESS+0x08],0x0000ffff    ; 基地址为0，段界限为0xFFFFF
+mov dword [GDT_START_ADDRESS+0x0c],0x00cf9200    ; 粒度为4KB，存储器段描述符 
+
+;建立保护模式下的堆栈段描述符      
+mov dword [GDT_START_ADDRESS+0x10],0x00000000    ; 基地址为0x00000000，界限0x0 
+mov dword [GDT_START_ADDRESS+0x14],0x00409600    ; 粒度为1个字节
+
+;建立保护模式下的显存描述符   
+mov dword [GDT_START_ADDRESS+0x18],0x80007fff    ; 基地址为0x000B8000，界限0x07FFF 
+mov dword [GDT_START_ADDRESS+0x1c],0x0040920b    ; 粒度为字节
+
+;创建保护模式下平坦模式代码段描述符
+mov dword [GDT_START_ADDRESS+0x20],0x0000ffff    ; 基地址为0，段界限为0xFFFFF
+mov dword [GDT_START_ADDRESS+0x24],0x00cf9800    ; 粒度为4kb，代码段描述符 
+
+;初始化描述符表寄存器GDTR
+mov word [pgdt], 39      ;描述符表的界限   
+lgdt [pgdt]
+      
+in al,0x92                         ;南桥芯片内的端口 
+or al,0000_0010B
+out 0x92,al                        ;打开A20
+
+cli                                ;中断机制尚未工作
+mov eax,cr0
+or eax,1
+mov cr0,eax                        ;设置PE位
+      
+;以下进入保护模式
+jmp dword CODE_SELECTOR:protect_mode_begin
+
+;16位的描述符选择子：32位偏移
+;清流水线并串行化处理器
+[bits 32]           
+protect_mode_begin:                              
+
+mov eax, DATA_SELECTOR                     ;加载数据段(0..4GB)选择子
+mov ds, eax
+mov es, eax
+mov eax, STACK_SELECTOR
+mov ss, eax
+mov eax, VIDEO_SELECTOR
+mov gs, eax
+
+start:
+    call clear_screen
+    call draw_id_name
+
+    mov byte [direction], 0     
+    mov byte [color], 0x1F      
+    mov byte [charIndex], 0
+    mov byte [row], 0           
+    mov byte [col], 0           
+
+    mov byte [left], 0
+    mov byte [right], 79         
+    mov byte [top], 0
+    mov byte [bottom], 24   
+
+main_loop:
+
+    cmp byte [direction], 0
+    je move_right
+    cmp byte [direction], 1
+    je move_down
+    cmp byte [direction], 2
+    je move_left
+    jmp move_up
+
+move_right:
+    inc byte [col]
+    mov bl, byte[right]
+    cmp byte [col],bl
+    jb  draw
+    mov byte [direction], 1                  
+    jmp draw
+
+move_down:
+    inc byte [row]
+    mov bl, byte[bottom]
+    cmp byte[row],bl
+    jb  draw
+    mov byte [direction], 2                
+    jmp draw
+
+move_left:
+    dec byte [col]
+    mov bl, byte[left]
+    cmp byte[col],bl
+    ja  draw
+    mov byte [direction], 3                
+    jmp draw
+
+move_up:
+    dec byte [row]
+    mov bl, byte[top]
+    cmp byte[row],bl
+    ja  draw
+    mov byte [direction], 0    
+
+draw:
+
+    call draw_char
+
+    call delay
+    inc byte[color]
+    inc byte[charIndex]
+    cmp byte[charIndex], 8
+    jl main_loop
+
+    ; 如果索引到达字符串末尾，重置为0，重新开始打印
+    mov byte [charIndex], 0
+    jmp main_loop
+
+draw_char:
+    pusha
+    xor ax, ax
+    mov al, [row]
+    mov bx, 80
+    mul bx
+    add al, [col]
+    adc ah, 0
+    shl ax, 1
+    mov di, ax
+
+    mov ebx, [charIndex]
+    mov esi, chars
+    mov al, [esi + ebx]
+    
+    mov ah, [color]
+    mov [gs:di], ax
+    popa
+    ret
+
+
+draw_id_name:
+    pusha
+
+    mov ecx, name_tag_end - name_tag
+    mov ebx, 995 * 2
+    mov esi, name_tag
+    mov ah, 0x74
+    output_name_tag:
+    mov al, [esi]
+    mov word[gs:ebx], ax
+    add ebx, 2
+    inc esi
+    loop output_name_tag
+
+    popa
+    ret 
+
+clear_screen:
+    pusha           
+    mov edi, 0xb8000             ; 使用 gs:0 访问显存基地址
+    mov ecx, 80 * 25        ; 80列×25行
+    mov ax, 0x0720          ; 空格字符（0x20），黑底白字（0x0F）
+    cld                     ; 方向标志清零（正向填充）
+    rep stosw     
+    popa     
+    ret      
+
+delay:
+    pusha
+    mov ecx, 0x1FFFFF
+    delay_loop:
+    dec ecx
+    jnz delay_loop
+    popa
+    ret
+
+chars db '23336342'
+chars_end:
+direction db 0
+color db 0x1F
+row db 0
+col db 0
+left db 0
+right db 79
+top db 0
+bottom db 24
+charIndex dd 0
+pgdt dw 0
+     dd GDT_START_ADDRESS
+
+name_tag db '23336342-ZWX'
+name_tag_end:
+
