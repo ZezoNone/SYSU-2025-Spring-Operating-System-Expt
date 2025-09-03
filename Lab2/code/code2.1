@@ -1,0 +1,20 @@
+org 0x7c00
+[bits 16]
+
+;get cursor position
+mov ah ,0x03
+mov bh ,0
+
+int 10h
+;set cursor position
+mov ah, 0x02
+mov bh, 0
+add dh, 3
+add dl, 3
+
+int 10h
+
+jmp $
+
+times 510 - ($ - $$) db 0
+db 0x55, 0xaa
